@@ -5,7 +5,7 @@ from slang_helper import (get_transcription_cursor, insert_evaluation, get_max_t
                           get_unprocessed_transcription_cursor, get_unprocessed_count)
 import sys
 import argparse
-from cross_verify_bye_bye import get_whisper_transcription, check_bye_bye_in_transcript
+from cross_verify_slang import get_whisper_transcription, should_count_slang, VERIFIED_SLANG_WORDS
 
 # List of slang words to check
 SLANG_WORDS = [
@@ -108,22 +108,12 @@ def count_slang_words(agent_lines, call_id=None):
                     print(f"      Context: '{agent_text_lower}'")
                     continue
                 
-                # Special handling for 'bye-bye' to check against the whisper transcription
-                if word == 'bye-bye' and call_id is not None:
-                    should_count = True  # Default to counting it
-                    
-                    # Look up the transcript in the whisper transcription
-                    whisper_transcript = get_whisper_transcription(call_id)
-                    if whisper_transcript:
-                        # Check if bye-bye is in the whisper transcript
-                        whisper_has_bye_bye, _ = check_bye_bye_in_transcript(whisper_transcript, last_lines_only=True)
-                        if not whisper_has_bye_bye:
-                            # Don't count it if it's not in the whisper transcript
-                            should_count = False
-                            print(f"INFO: 'bye-bye' found in gemini transcription but NOT in whisper transcription for call_id {call_id} - NOT counting it")
-                    
-                    if not should_count:
-                        continue  # Skip this occurrence
+                # Special handling for slang words that need verification with whisper transcriptions
+                if word in VERIFIED_SLANG_WORDS and call_id is not None:
+                    # Check if the word should be counted (appears in both gemini and whisper)
+                    if not should_count_slang(call_id, word):
+                        # Skip this occurrence if it doesn't appear in whisper transcription
+                        continue
                 
                 start_pos = match.start()
                 end_pos = match.end()
@@ -217,7 +207,7 @@ def parse_arguments():
     parser.add_argument('--batch-size', type=int, default=10, help='Number of records to fetch at once (default: 10)')
     parser.add_argument('--start-id', type=int, help='Starting ID for transcription_id (optional, auto-increments from last used ID if not specified)')
     parser.add_argument('--process-all', action='store_true', help='Process all call_ids even if already processed (default: skip processed)')
-    parser.add_argument('--verify-bye-bye', action='store_true', help='Verify bye-bye occurrences against whisper transcriptions')
+    parser.add_argument('--no-slang-verification', action='store_true', help='Disable verification of slang words against whisper transcriptions')
     parser.add_argument('--no-question-context', action='store_true', help='Disable contextual analysis for "yeah" near questions')
     return parser.parse_args()
 
@@ -252,10 +242,10 @@ def main():
     
     # Build verification message
     verification_features = []
-    if args.verify_bye_bye:
-        verification_features.append("verifying 'bye-bye' against whisper transcriptions")
+    if not args.no_slang_verification:
+        verification_features.append(f"verifying {', '.join([f"'{word}'" for word in VERIFIED_SLANG_WORDS])} against whisper transcriptions")
     if not args.no_question_context:
-        verification_features.append("ignoring 'yeah' near questions")
+        verification_features.append("ignoring responses like 'yeah' near questions")
     verify_msg = ", " + ", ".join(verification_features) if verification_features else ""
     
     print(f"Running in {mode_desc}{limit_desc}, batch size: {batch_size}, starting ID: {transcription_id}{skip_msg}{verify_msg}")
