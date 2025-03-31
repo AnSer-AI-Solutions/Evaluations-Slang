@@ -14,6 +14,9 @@ SLANG_WORDS = [
     'bye-bye', 'yup', 'yep', 'ya', 'yeah', 'okay dokey', 'okey dokey'
 ]
 
+# List of slang words that are acceptable in question context
+QUESTION_RESPONSE_SLANG = ['yeah', 'yup', 'yep', 'ya']
+
 # Mapping of slang words to proper alternatives
 SLANG_ALTERNATIVES = {
     'yup': 'yes',
@@ -47,6 +50,30 @@ def extract_agent_lines(transcription):
     
     return agent_lines
 
+def is_near_question(agent_lines, current_index):
+    """
+    Check if the current line is near a question mark in agent lines
+    Returns True if there's a question mark in the current, previous or next agent line
+    """
+    # Check current line
+    current_line = agent_lines[current_index]
+    if '?' in current_line:
+        return True
+        
+    # Check previous line if available
+    if current_index > 0:
+        prev_line = agent_lines[current_index - 1]
+        if '?' in prev_line:
+            return True
+            
+    # Check next line if available
+    if current_index < len(agent_lines) - 1:
+        next_line = agent_lines[current_index + 1]
+        if '?' in next_line:
+            return True
+            
+    return False
+
 def count_slang_words(agent_lines, call_id=None):
     """Count occurrences of each slang word in the text and track timestamps"""
     slang_counts = {}
@@ -56,7 +83,8 @@ def count_slang_words(agent_lines, call_id=None):
     for word in SLANG_WORDS:
         slang_counts[word] = 0
     
-    for line in agent_lines:
+    # Process each agent line
+    for i, line in enumerate(agent_lines):
         # Extract timestamp (assuming it's at the beginning of the line before AGENT:)
         parts = line.split('AGENT:', 1)
         if len(parts) < 2:
@@ -73,6 +101,13 @@ def count_slang_words(agent_lines, call_id=None):
             
             # Find all occurrences of this slang word in the line
             for match in re.finditer(pattern, agent_text_lower):
+                # Special handling for 'yeah', 'yup', etc. near questions
+                if word in QUESTION_RESPONSE_SLANG and is_near_question(agent_lines, i):
+                    # This is an acceptable use of 'yeah', 'yup', etc. near a question
+                    print(f"INFO: '{word}' found near a question - NOT counting it as slang")
+                    print(f"      Context: '{agent_text_lower}'")
+                    continue
+                
                 # Special handling for 'bye-bye' to check against the whisper transcription
                 if word == 'bye-bye' and call_id is not None:
                     should_count = True  # Default to counting it
@@ -182,7 +217,8 @@ def parse_arguments():
     parser.add_argument('--batch-size', type=int, default=10, help='Number of records to fetch at once (default: 10)')
     parser.add_argument('--start-id', type=int, help='Starting ID for transcription_id (optional, auto-increments from last used ID if not specified)')
     parser.add_argument('--process-all', action='store_true', help='Process all call_ids even if already processed (default: skip processed)')
-    parser.add_argument('--verify-bye-bye', action='store_true', help='Verify bye-bye occurrences against senna-database')
+    parser.add_argument('--verify-bye-bye', action='store_true', help='Verify bye-bye occurrences against whisper transcriptions')
+    parser.add_argument('--no-question-context', action='store_true', help='Disable contextual analysis for "yeah" near questions')
     return parser.parse_args()
 
 def main():
@@ -213,7 +249,14 @@ def main():
     mode_desc = "test mode" if args.test else ("limited mode" if args.limit else "full mode")
     limit_desc = f" (target: {target_processed} processed records)" if target_processed else ""
     skip_msg = "" if args.process_all else ", skipping processed call_ids"
-    verify_msg = ", verifying 'bye-bye' against whisper transcriptions" if args.verify_bye_bye else ""
+    
+    # Build verification message
+    verification_features = []
+    if args.verify_bye_bye:
+        verification_features.append("verifying 'bye-bye' against whisper transcriptions")
+    if not args.no_question_context:
+        verification_features.append("ignoring 'yeah' near questions")
+    verify_msg = ", " + ", ".join(verification_features) if verification_features else ""
     
     print(f"Running in {mode_desc}{limit_desc}, batch size: {batch_size}, starting ID: {transcription_id}{skip_msg}{verify_msg}")
     print(f"Highest existing transcription_id: {max_id}")
