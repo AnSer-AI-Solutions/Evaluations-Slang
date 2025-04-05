@@ -3,14 +3,11 @@ import os
 import psycopg2
 import json
 from dotenv import load_dotenv
-from slang_with_verification import extract_agent_lines, SLANG_WORDS, SLANG_ALTERNATIVES
+from slang_common import extract_agent_lines, SLANG_WORDS, SLANG_ALTERNATIVES, VERIFIED_SLANG_WORDS
 from slang_helper import get_db_connection
 
 # Load environment variables
 load_dotenv()
-
-# Define slang words that need verification
-VERIFIED_SLANG_WORDS = ['bye-bye']
 
 def get_senna_db_connection():
     """Create a connection to the Senna PostgreSQL database"""
